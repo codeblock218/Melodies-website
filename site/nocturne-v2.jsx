@@ -4,6 +4,46 @@
 const D2 = window.MOC_DATA;
 const { useState, useEffect, useRef } = React;
 
+/* ---------- Responsive plumbing ----------
+   Every component here styles inline, so there is nowhere to hang a media
+   query. Breakpoints are resolved in JS instead: the root components
+   (MOCSite / MOCGallery) set M and T on each render, exactly the way they
+   already set the palette C, and the children read them while rendering. */
+const MOBILE_MAX = 767;
+const TABLET_MAX = 1024;
+
+let M = false; // compact / phone
+let T = false; // narrow / tablet (true on phones too)
+
+function useViewportWidth() {
+  const [w, setW] = useState(() => typeof window === "undefined" ? 1400 : window.innerWidth);
+  useEffect(() => {
+    let frame = 0;
+    const onResize = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setW(window.innerWidth));
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, []);
+  return w;
+}
+
+function applyViewport(w) {
+  M = w <= MOBILE_MAX;
+  T = w <= TABLET_MAX;
+}
+
+// Section gutter — the single source of horizontal rhythm.
+const gutter = () => M ? 22 : 64;
+// Sections keep their desktop proportions but breathe less on a phone.
+const sectionPad = (y) => `${M ? Math.round(y * 0.55) : y}px ${gutter()}px`;
+
 
 const PAPERS = {
   porcelain: { name: "Porcelain", desc: "Crisp porcelain white with cool undertone.", cream: "#f1f2ee" },
@@ -68,36 +108,145 @@ function staffMark(color = C.blueDeep, w = 30) {
 // ---------- Top nav ----------
 function Nav({ onOpenStory, home = true }) {
   const homeUrl = "index.html";
+  const [menuOpen, setMenuOpen] = useState(false);
   const link = (anchor) => home ? `#${anchor}` : `${homeUrl}#${anchor}`;
   const storyHref = home ? undefined : `${homeUrl}?openStory=1`;
   const handleStory = (e) => {
+    setMenuOpen(false);
     if (home && onOpenStory) {e.preventDefault();onOpenStory();}
   };
+
+  // Derived, not stored: if the viewport grows back to desktop mid-session the
+  // drawer closes itself and releases the scroll lock.
+  const drawerOpen = menuOpen && M;
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e) => {if (e.key === "Escape") setMenuOpen(false);};
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [drawerOpen]);
+
+  const items = [
+  { label: "His Story", href: storyHref, onClick: handleStory },
+  { label: "Music", href: link("music") },
+  { label: "Gallery", href: "gallery.html" },
+  { label: "Sheet Music", href: link("sheet") }];
+
+
   return (
     <nav style={{
       position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
-      padding: "26px 56px",
+      padding: M ? "14px 18px" : "26px 56px",
       display: "flex", justifyContent: "space-between", alignItems: "center",
       color: C.ink
     }}>
       <a href={home ? "#top" : homeUrl} style={{ display: "inline-block" }}>
-        <img src="assets/logo.png" alt="Melodies of Courage" style={{ height: 126, display: "block" }} />
+        <img src="assets/logo.png" alt="Melodies of Courage" style={{ height: M ? 62 : 126, display: "block" }} />
       </a>
+
+      {M ?
+      <button
+        onClick={() => setMenuOpen((o) => !o)}
+        aria-label={drawerOpen ? "Close menu" : "Open menu"}
+        aria-expanded={drawerOpen}
+        style={{
+          width: 46, height: 46, flexShrink: 0,
+          display: "flex", flexDirection: "column", justifyContent: "center", gap: 6,
+          padding: "0 9px",
+          background: "rgba(255,255,255,0.7)",
+          backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
+          border: `1px solid ${C.blueLight}`, borderRadius: 2, cursor: "pointer"
+        }}>
+
+          {[0, 1, 2].map((i) =>
+        <span key={i} style={{ display: "block", height: 1.5, background: C.ink, borderRadius: 1 }} />
+        )}
+        </button> :
+
       <div style={{
-        display: "flex", gap: 32, alignItems: "center",
-        fontFamily: "'EB Garamond', Georgia, serif", fontSize: "18px", fontWeight: "500"
+        display: "flex", gap: T ? 22 : 32, alignItems: "center",
+        fontFamily: "'EB Garamond', Georgia, serif", fontSize: T ? "16px" : "18px", fontWeight: "500"
       }}>
-        <a href={storyHref} onClick={handleStory} style={navLink}>His Story</a>
-        <a href={link("music")} style={navLink}>Music</a>
-        <a href="gallery.html" style={navLink}>Gallery</a>
-        <a href={link("sheet")} style={navLink}>Sheet Music</a>
-        <a href={D2.donateUrl} target="_blank" style={{
+          {items.map((it) =>
+        <a key={it.label} href={it.href} onClick={it.onClick} style={navLink}>{it.label}</a>
+        )}
+          <a href={D2.donateUrl} target="_blank" style={{
           ...navLink,
           background: C.blueDeep, color: C.cream,
           padding: "10px 20px", borderRadius: 2,
           fontStyle: "normal"
         }}>Donate</a>
-      </div>
+        </div>
+      }
+
+      {drawerOpen &&
+      <div
+        onClick={() => setMenuOpen(false)}
+        style={{
+          position: "fixed", inset: 0, zIndex: 90,
+          background: "rgba(31,53,86,0.5)",
+          backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)",
+          animation: "fadeIn 0.25s ease"
+        }}>
+
+          <style>{`@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }`}</style>
+          <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: C.cream,
+            padding: "14px 22px 34px",
+            boxShadow: "0 24px 60px rgba(31,53,86,0.4)"
+          }}>
+
+            {/* The panel covers the bar, so it carries the mark and the close
+                control itself rather than leaving a blank band above the links. */}
+            <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            marginBottom: 16
+          }}>
+              <img src="assets/logo.png" alt="Melodies of Courage" style={{ height: 62, display: "block" }} />
+              <button
+              onClick={() => setMenuOpen(false)}
+              aria-label="Close menu"
+              style={{
+                width: 42, height: 42, borderRadius: "50%", flexShrink: 0,
+                background: "transparent", border: `1px solid ${C.inkSoft}`,
+                color: C.inkSoft, fontSize: 22, cursor: "pointer",
+                fontFamily: "'EB Garamond', Georgia, serif", lineHeight: 1
+              }}>
+              ×
+            </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {items.map((it) =>
+            <a
+              key={it.label}
+              href={it.href}
+              onClick={(e) => {if (it.onClick) it.onClick(e);else setMenuOpen(false);}}
+              style={{
+                ...navLink,
+                fontFamily: "'EB Garamond', Georgia, serif",
+                fontSize: 26, padding: "15px 0",
+                borderBottom: `1px solid ${C.blueLight}`
+              }}>
+              {it.label}
+            </a>
+            )}
+              <a href={D2.donateUrl} target="_blank" onClick={() => setMenuOpen(false)} style={{
+              ...navLink,
+              marginTop: 26, textAlign: "center",
+              background: C.blueDeep, color: C.cream,
+              padding: "16px 24px", borderRadius: 2,
+              fontStyle: "normal", fontFamily: "'EB Garamond', Georgia, serif", fontSize: 19
+            }}>Donate</a>
+            </div>
+          </div>
+        </div>
+      }
     </nav>);
 
 }
@@ -114,20 +263,24 @@ function Hero({ onOpenStory }) {
     <section style={{
       position: "relative",
       color: C.ink,
-      paddingTop: 200, paddingBottom: 120,
+      paddingTop: M ? 92 : 200, paddingBottom: M ? 64 : 120,
       overflow: "hidden",
       isolation: "isolate"
     }}>
-      {/* Background photograph */}
+      {/* Background photograph. On a phone the frame turns tall, so the crop is
+          pulled left to keep Kevin and the keys inside the visible sliver. */}
       <div aria-hidden="true" style={{
         position: "absolute", inset: 0, zIndex: 0,
-        background: `url('assets/kevin-hero-bg.jpg') center/cover no-repeat`,
+        background: `url('assets/kevin-hero-bg.jpg') ${M ? "38% center" : "center"}/cover no-repeat`,
         filter: "saturate(0.9) brightness(0.92)"
       }} />
-      {/* Right-side wash so text reads but the subject on the left stays visible */}
+      {/* Desktop washes sideways (subject left, text right); a phone stacks, so
+          the wash runs top-to-bottom instead and the copy sits on near-solid paper. */}
       <div aria-hidden="true" style={{
         position: "absolute", inset: 0, zIndex: 1,
-        background: `linear-gradient(95deg, rgba(238,241,244,0) 0%, rgba(238,241,244,0.04) 38%, rgba(238,241,244,0.45) 62%, rgba(238,241,244,0.72) 100%)`
+        background: M ?
+        `linear-gradient(180deg, rgba(238,241,244,0) 0%, rgba(238,241,244,0.06) 22%, rgba(238,241,244,0.62) 38%, rgba(238,241,244,0.93) 50%, rgba(238,241,244,1) 60%)` :
+        `linear-gradient(95deg, rgba(238,241,244,0) 0%, rgba(238,241,244,0.04) 38%, rgba(238,241,244,0.45) 62%, rgba(238,241,244,0.72) 100%)`
       }} />
       {/* Subtle top fade to blend the nav */}
       <div aria-hidden="true" style={{
@@ -137,7 +290,7 @@ function Hero({ onOpenStory }) {
 
       <div style={{
         position: "relative", zIndex: 2,
-        padding: "60px 64px 0",
+        padding: M ? `${180}px ${gutter()}px 0` : "60px 64px 0",
         display: "flex", justifyContent: "flex-end"
       }}>
         {/* Title block */}
@@ -145,36 +298,36 @@ function Hero({ onOpenStory }) {
           <div style={{ ...{
               fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
               color: C.blueDeep, letterSpacing: "0.05em",
-              marginBottom: 18, fontSize: "20px", textAlign: "left"
+              marginBottom: M ? 12 : 18, fontSize: M ? "15px" : "20px", textAlign: "left"
             }, color: "rgb(31, 53, 86)", fontWeight: "500" }}>
             ♪ In loving memory · Kevin Chen · 2009 — 2025
           </div>
           <h1 style={{
             fontFamily: "'EB Garamond', 'Cormorant Garamond', Georgia, serif",
-            fontWeight: 400, fontSize: 88, lineHeight: 0.95, margin: 0,
+            fontWeight: 400, fontSize: M ? 52 : T ? 72 : 88, lineHeight: 0.95, margin: 0,
             letterSpacing: "-0.025em", color: C.ink, textAlign: "left"
           }}>
             Melodies<br />
             <em style={{ fontStyle: "italic", color: C.blueDeep }}>of</em> Courage
           </h1>
           <p style={{
-            marginTop: 28, marginBottom: 36,
+            marginTop: M ? 20 : 28, marginBottom: M ? 28 : 36,
             fontFamily: "'EB Garamond', Georgia, serif",
-            fontSize: 22, lineHeight: 1.55, maxWidth: 620,
+            fontSize: M ? 18 : 22, lineHeight: 1.55, maxWidth: 620,
             color: C.inkSoft, textAlign: "left", fontWeight: "500"
           }}>
             The story and music of <em style={{ fontWeight: "500" }}>Kevin Chen</em> — a young composer
             whose melodies speak in ways words cannot.
           </p>
 
-          <div style={{ textAlign: "left", marginBottom: 44, fontWeight: "500" }}>
+          <div style={{ textAlign: "left", marginBottom: M ? 32 : 44, fontWeight: "500" }}>
             <button onClick={onOpenStory} style={{ ...{
                 background: "rgba(247,247,247,0.65)",
                 backdropFilter: "blur(6px)",
                 WebkitBackdropFilter: "blur(6px)",
                 border: `1px solid ${C.blueDeep}`,
                 color: C.blueDeep,
-                padding: "13px 28px",
+                padding: M ? "14px 24px" : "13px 28px",
                 fontFamily: "'EB Garamond', Georgia, serif",
                 fontStyle: "italic", fontSize: 17, cursor: "pointer"
               }, border: "1.21226px solid rgb(61, 107, 179)" }}>
@@ -188,12 +341,12 @@ function Hero({ onOpenStory }) {
             background: "rgba(255,255,255,0.88)",
             backdropFilter: "blur(10px)",
             WebkitBackdropFilter: "blur(10px)",
-            padding: 22,
-            display: "flex", alignItems: "center", gap: 22,
+            padding: M ? 16 : 22,
+            display: "flex", alignItems: "center", gap: M ? 16 : 22,
             boxShadow: "0 18px 48px -20px rgba(31,53,86,0.4)"
           }}>
             <button onClick={() => setPlaying((p) => !p)} style={{
-              width: 56, height: 56, borderRadius: "50%",
+              width: M ? 48 : 56, height: M ? 48 : 56, borderRadius: "50%",
               background: C.blueDeep, border: "none", cursor: "pointer",
               display: "flex", alignItems: "center", justifyContent: "center",
               flexShrink: 0
@@ -209,7 +362,7 @@ function Hero({ onOpenStory }) {
                 </svg>
               }
             </button>
-            <div style={{ flex: 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
                 fontSize: 11, color: C.blueDeep, letterSpacing: "0.18em",
@@ -217,15 +370,16 @@ function Hero({ onOpenStory }) {
               }}>♪ Featured · 2022</div>
               <div style={{
                 fontFamily: "'EB Garamond', Georgia, serif",
-                fontSize: 26, fontStyle: "italic", color: C.ink, lineHeight: 1.1
+                fontSize: M ? 22 : 26, fontStyle: "italic", color: C.ink, lineHeight: 1.1
               }}>Going Home</div>
-              {/* fake waveform */}
-              <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 18, marginTop: 10 }}>
-                {Array.from({ length: 60 }).map((_, i) =>
+              {/* fake waveform — fewer, fixed-width bars on a phone so the row
+                  never outgrows the card instead of shrinking to sub-pixel slivers */}
+              <div style={{ display: "flex", gap: 2, alignItems: "flex-end", height: 18, marginTop: 10, overflow: "hidden" }}>
+                {Array.from({ length: M ? 34 : 60 }).map((_, i) =>
                 <div key={i} style={{
-                  width: 2,
+                  width: 2, flex: "0 0 2px",
                   height: `${20 + Math.abs(Math.sin(i * 0.6) * 60) + i % 5 * 8}%`,
-                  background: i < (playing ? 25 : 0) ? C.blueDeep : C.blueLight,
+                  background: i < (playing ? Math.round((M ? 34 : 60) * 0.42) : 0) ? C.blueDeep : C.blueLight,
                   transition: "background 0.3s"
                 }} />
                 )}
@@ -253,34 +407,38 @@ function Hero({ onOpenStory }) {
 function MusicLibrary() {
   return (
     <section id="music" style={{
-      padding: "120px 64px",
+      padding: sectionPad(120),
       background: C.cream,
       color: C.ink,
       position: "relative"
     }}>
       <div style={{ maxWidth: 1280, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 64 }}>
+        <div style={{ textAlign: "center", marginBottom: M ? 40 : 64 }}>
           <div style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: 14, fontSize: "24px"
+            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: M ? 10 : 14, fontSize: M ? "18px" : "24px"
           }}>♪ Music Library</div>
           <h2 style={{
             fontFamily: "'EB Garamond', Georgia, serif",
-            fontWeight: 400, fontSize: 60, lineHeight: 1, margin: 0, letterSpacing: "-0.02em"
+            fontWeight: 400, fontSize: M ? 36 : 60, lineHeight: M ? 1.05 : 1, margin: 0, letterSpacing: "-0.02em"
           }}>
             Listen to <em style={{ color: C.blueDeep }}>his compositions.</em>
           </h2>
           <p style={{
             fontFamily: "'EB Garamond', Georgia, serif",
-            fontStyle: "italic", fontSize: 18, color: C.inkSoft,
-            marginTop: 18, maxWidth: 600, marginLeft: "auto", marginRight: "auto"
+            fontStyle: "italic", fontSize: M ? 16 : 18, color: C.inkSoft,
+            marginTop: M ? 14 : 18, maxWidth: 600, marginLeft: "auto", marginRight: "auto"
           }}>
             Pieces composed during treatment, in hospital rooms, and in quiet moments at home —
             a living, breathing body of music.
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32 }}>
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: M ? "1fr" : T ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          gap: M ? 36 : 32
+        }}>
           {D2.videos.map((v, i) =>
           <div key={v.id}>
               <div style={{
@@ -318,12 +476,12 @@ function MusicLibrary() {
           )}
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 56 }}>
+        <div style={{ textAlign: "center", marginTop: M ? 40 : 56 }}>
           <a href="https://www.youtube.com/" target="_blank" style={{
             color: C.blueDeep,
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
             textDecoration: "none",
-            borderBottom: `1px solid ${C.blueDeep}`, paddingBottom: 4, fontSize: "20px"
+            borderBottom: `1px solid ${C.blueDeep}`, paddingBottom: 4, fontSize: M ? "17px" : "20px"
           }}>
             Visit the full YouTube channel →
           </a>
@@ -337,14 +495,15 @@ function MusicLibrary() {
 function StoryTeaser({ onOpenStory }) {
   return (
     <section style={{
-      padding: "100px 64px",
+      padding: sectionPad(100),
       background: `linear-gradient(180deg, ${C.cream} 0%, ${C.blueWash} 100%)`,
       color: C.ink,
       position: "relative", overflow: "hidden"
     }}>
       <div style={{
         maxWidth: 1100, margin: "0 auto",
-        display: "grid", gridTemplateColumns: "1fr 1fr", gap: 64, alignItems: "center"
+        display: "grid", gridTemplateColumns: M ? "1fr" : "1fr 1fr",
+        gap: M ? 32 : 64, alignItems: "center"
       }}>
         <div style={{
           aspectRatio: "4/3",
@@ -354,19 +513,19 @@ function StoryTeaser({ onOpenStory }) {
         <div>
           <div style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: 16, fontSize: "24px"
+            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: M ? 12 : 16, fontSize: M ? "18px" : "24px"
           }}>♪ His Story</div>
           <h2 style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontWeight: 400,
-            fontSize: 48, lineHeight: 1.05, letterSpacing: "-0.02em",
-            margin: "0 0 24px"
+            fontSize: M ? 32 : 48, lineHeight: M ? 1.08 : 1.05, letterSpacing: "-0.02em",
+            margin: M ? "0 0 18px" : "0 0 24px"
           }}>
             <em>"He spoke a language</em><br />beyond words."
           </h2>
           <p style={{
             fontFamily: "'EB Garamond', Georgia, serif",
-            fontSize: 19, lineHeight: 1.6, color: C.inkSoft,
-            margin: "0 0 32px"
+            fontSize: M ? 17 : 19, lineHeight: 1.6, color: C.inkSoft,
+            margin: M ? "0 0 26px" : "0 0 32px"
           }}>
             From his first touch of a piano at four, Kevin spoke through music
             with breathtaking fluency. Through diagnosis, treatment, and his
@@ -375,10 +534,11 @@ function StoryTeaser({ onOpenStory }) {
           </p>
           <button onClick={onOpenStory} style={{
             background: C.blueDeep, color: C.cream,
-            border: "none", padding: "16px 32px",
+            border: "none", padding: M ? "15px 26px" : "16px 32px",
             fontFamily: "'EB Garamond', Georgia, serif",
             fontStyle: "italic", fontSize: 17,
-            cursor: "pointer", letterSpacing: "0.02em"
+            cursor: "pointer", letterSpacing: "0.02em",
+            width: M ? "100%" : "auto"
           }}>
             Read Kevin's full story →
           </button>
@@ -409,37 +569,41 @@ function StoryModal({ open, onClose }) {
       background: "rgba(31,53,86,0.55)",
       backdropFilter: "blur(6px)",
       display: "flex", justifyContent: "center", alignItems: "flex-start",
-      padding: "60px 24px",
+      padding: M ? 0 : "60px 24px",
       overflowY: "auto",
+      WebkitOverflowScrolling: "touch",
       animation: "fadeIn 0.3s ease"
     }}>
       <style>{`@keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
                @keyframes slideUp { from { opacity: 0; transform: translateY(20px) } to { opacity: 1; transform: translateY(0) } }`}</style>
+      {/* Full-bleed sheet on a phone — a floating card at this width just wastes
+          the little horizontal room the story has to read in. */}
       <article onClick={(e) => e.stopPropagation()} style={{
         background: C.cream, color: C.ink,
         maxWidth: 760, width: "100%",
-        padding: "72px 72px 80px",
+        minHeight: M ? "100%" : undefined,
+        padding: M ? "78px 22px 56px" : "72px 72px 80px",
         position: "relative",
         boxShadow: "0 40px 80px rgba(31,53,86,0.5)",
         animation: "slideUp 0.4s ease"
       }}>
         <button onClick={onClose} style={{
-          position: "absolute", top: 22, right: 22,
+          position: "absolute", top: M ? 18 : 22, right: M ? 18 : 22,
           background: "transparent", border: `1px solid ${C.inkSoft}`,
           color: C.inkSoft,
-          width: 40, height: 40, borderRadius: "50%",
-          cursor: "pointer", fontSize: 20,
+          width: M ? 42 : 40, height: M ? 42 : 40, borderRadius: "50%",
+          cursor: "pointer", fontSize: 20, lineHeight: 1,
           fontFamily: "'EB Garamond', Georgia, serif"
         }}>×</button>
 
-        <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <div style={{ textAlign: "center", marginBottom: M ? 30 : 40 }}>
           <div style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            color: C.blueDeep, fontSize: 15, letterSpacing: "0.1em", marginBottom: 14
+            color: C.blueDeep, fontSize: M ? 13 : 15, letterSpacing: "0.1em", marginBottom: M ? 10 : 14
           }}>♪ His Story · Kevin Chen · 2009 — 2025</div>
           <h2 style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontWeight: 400,
-            fontSize: 52, lineHeight: 1.05, letterSpacing: "-0.02em",
+            fontSize: M ? 32 : 52, lineHeight: M ? 1.08 : 1.05, letterSpacing: "-0.02em",
             margin: 0
           }}>
             <em>"He spoke a language</em><br />beyond words."
@@ -449,21 +613,21 @@ function StoryModal({ open, onClose }) {
         {D2.kevin.storyParagraphs.map((p, i) =>
         <p key={i} style={{
           fontFamily: "'EB Garamond', Georgia, serif",
-          fontSize: 19, lineHeight: 1.7,
+          fontSize: M ? 17 : 19, lineHeight: 1.7,
           margin: i === 0 ? "0 0 22px" : "0 0 22px",
           color: C.ink
         }}>{p}</p>
         )}
 
         <div style={{
-          marginTop: 40, padding: "32px 0",
+          marginTop: M ? 30 : 40, padding: M ? "24px 0" : "32px 0",
           borderTop: `1px solid ${C.blueLight}`,
           borderBottom: `1px solid ${C.blueLight}`,
           textAlign: "center"
         }}>
           <div style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            fontSize: 22, lineHeight: 1.5, color: C.ink
+            fontSize: M ? 18 : 22, lineHeight: 1.5, color: C.ink
           }}>"{D2.quote.body}"</div>
           <div style={{
             marginTop: 14, fontStyle: "italic", fontSize: 14,
@@ -486,26 +650,26 @@ function Gallery() {
 
   return (
     <section id="gallery" style={{
-      padding: "120px 64px",
+      padding: sectionPad(120),
       background: `linear-gradient(180deg, ${C.blueWash} 0%, ${C.cream} 100%)`,
       color: C.ink
     }}>
       <div style={{ maxWidth: 1280, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 64 }}>
+        <div style={{ textAlign: "center", marginBottom: M ? 36 : 64 }}>
           <div style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: 14, fontSize: "24px"
+            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: M ? 10 : 14, fontSize: M ? "18px" : "24px"
           }}>♪ Remembrances</div>
           <h2 style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontWeight: 400,
-            fontSize: 56, lineHeight: 1, margin: 0, letterSpacing: "-0.02em"
+            fontSize: M ? 36 : 56, lineHeight: M ? 1.05 : 1, margin: 0, letterSpacing: "-0.02em"
           }}>Moments <em style={{ color: C.blueDeep }}>held close.</em></h2>
         </div>
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(4, 1fr)",
-          gridAutoRows: "200px",
-          gap: 16
+          gridTemplateColumns: M ? "repeat(2, 1fr)" : T ? "repeat(3, 1fr)" : "repeat(4, 1fr)",
+          gridAutoRows: M ? "142px" : "200px",
+          gap: M ? 10 : 16
         }}>
           {photos.map((p, i) =>
           <figure key={i} style={{
@@ -544,9 +708,9 @@ function Gallery() {
         </div>
 
         <div style={{
-          textAlign: "center", marginTop: 40,
+          textAlign: "center", marginTop: M ? 28 : 40,
           fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-          fontSize: 17, color: C.inkSoft
+          fontSize: M ? 15 : 17, color: C.inkSoft
         }}>
           To share a memory or photograph,{" "}
           <a href="mailto:" style={{ color: C.blueDeep, textDecoration: "underline" }}>write to us</a>.
@@ -560,61 +724,72 @@ function Gallery() {
 function Sheet() {
   return (
     <section id="sheet" style={{
-      padding: "120px 64px",
+      padding: sectionPad(120),
       background: C.cream,
       color: C.ink
     }}>
       <div style={{ maxWidth: 920, margin: "0 auto" }}>
-        <div style={{ textAlign: "center", marginBottom: 56 }}>
+        <div style={{ textAlign: "center", marginBottom: M ? 34 : 56 }}>
           <div style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: 14, fontSize: "24px"
+            color: C.blueDeep, letterSpacing: "0.1em", marginBottom: M ? 10 : 14, fontSize: M ? "18px" : "24px"
           }}>♪ Sheet Music</div>
           <h2 style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontWeight: 400,
-            fontSize: 48, lineHeight: 1, margin: "0 0 14px", letterSpacing: "-0.02em"
+            fontSize: M ? 34 : 48, lineHeight: M ? 1.05 : 1, margin: "0 0 14px", letterSpacing: "-0.02em"
           }}>Take his music <em style={{ color: C.blueDeep }}>home.</em></h2>
           <p style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-            fontSize: 17, color: C.inkSoft, margin: 0
+            fontSize: M ? 15 : 17, color: C.inkSoft, margin: 0
           }}>All proceeds support the Kevin Chen Osteosarcoma & Music Fund.</p>
         </div>
 
         <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: `1px solid ${C.blueLight}` }}>
           {D2.sheetMusic.map((s, i) =>
+          /* One row of five columns on desktop; on a phone the same five cells
+             fold into three lines via named areas — number/price, title, actions. */
           <li key={i} style={{
             display: "grid",
-            gridTemplateColumns: "auto 1fr auto auto auto",
-            alignItems: "center", gap: 24,
-            padding: "22px 0",
+            gridTemplateColumns: M ? "1fr auto" : "auto 1fr auto auto auto",
+            gridTemplateAreas: M ? `"num price" "info info" "preview buy"` : undefined,
+            alignItems: "center",
+            rowGap: M ? 14 : 0, columnGap: M ? 16 : 24,
+            padding: M ? "20px 0" : "22px 0",
             borderBottom: `1px solid ${C.blueLight}`
           }}>
               <div style={{
+              gridArea: M ? "num" : undefined,
               fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-              color: C.blueDeep, width: 40, fontSize: 16
+              color: C.blueDeep, width: M ? "auto" : 40, fontSize: 16
             }}>No. {String(i + 1).padStart(2, '0')}</div>
-              <div>
+              <div style={{ gridArea: M ? "info" : undefined }}>
                 <div style={{
                 fontFamily: "'EB Garamond', Georgia, serif",
-                fontStyle: "italic", fontSize: 26, lineHeight: 1.1
+                fontStyle: "italic", fontSize: M ? 24 : 26, lineHeight: M ? 1.15 : 1.1
               }}>{s.title}</div>
                 <div style={{
                 fontFamily: "'EB Garamond', Georgia, serif",
-                color: C.inkSoft, marginTop: 4, fontSize: "18px"
+                color: C.inkSoft, marginTop: 4, fontSize: M ? "16px" : "18px"
               }}>{s.subtitle}</div>
               </div>
               <button style={{
+              gridArea: M ? "preview" : undefined,
+              justifySelf: M ? "start" : "auto",
               background: "transparent", border: "none",
               color: C.blueDeep, cursor: "pointer",
               fontFamily: "'EB Garamond', Georgia, serif",
               fontStyle: "italic", fontSize: 15,
-              borderBottom: `1px solid ${C.blueDeep}`, paddingBottom: 2
+              borderBottom: `1px solid ${C.blueDeep}`, paddingBottom: 2,
+              paddingLeft: M ? 0 : undefined
             }}>Preview</button>
               <div style={{
+              gridArea: M ? "price" : undefined,
+              justifySelf: M ? "end" : "auto",
               fontFamily: "'EB Garamond', Georgia, serif",
               fontSize: 22, color: C.blueDeep
             }}>{s.price}</div>
               <button style={{
+              gridArea: M ? "buy" : undefined,
               background: C.blueDeep, color: C.cream,
               border: "none", padding: "12px 26px", cursor: "pointer",
               fontFamily: "'EB Garamond', Georgia, serif",
@@ -632,7 +807,7 @@ function Sheet() {
 function Donate() {
   return (
     <section id="donate" style={{
-      padding: "140px 64px",
+      padding: sectionPad(140),
       background: `linear-gradient(180deg, ${C.cream} 0%, ${C.blueWash} 60%, ${C.blueLight} 100%)`,
       color: C.ink, textAlign: "center", position: "relative", overflow: "hidden"
     }}>
@@ -648,31 +823,31 @@ function Donate() {
       <div style={{ maxWidth: 720, margin: "0 auto", position: "relative" }}>
         <div style={{
           fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-          color: C.blueDeep, letterSpacing: "0.1em", marginBottom: 16, fontSize: "24px"
+          color: C.blueDeep, letterSpacing: "0.1em", marginBottom: M ? 12 : 16, fontSize: M ? "17px" : "24px"
         }}>♪ Kevin Chen Osteosarcoma & Music Fund</div>
         <h2 style={{
           fontFamily: "'EB Garamond', Georgia, serif", fontWeight: 400,
-          fontSize: 64, lineHeight: 1.05, margin: "0 0 28px", letterSpacing: "-0.02em"
+          fontSize: M ? 38 : 64, lineHeight: 1.05, margin: M ? "0 0 20px" : "0 0 28px", letterSpacing: "-0.02em"
         }}><em>Carry his music</em> forward.</h2>
         <p style={{
           fontFamily: "'EB Garamond', Georgia, serif",
-          fontSize: 21, lineHeight: 1.6, color: C.inkSoft,
-          margin: "0 auto 44px", maxWidth: 580
+          fontSize: M ? 18 : 21, lineHeight: 1.6, color: C.inkSoft,
+          margin: M ? "0 auto 32px" : "0 auto 44px", maxWidth: 580
         }}>
           The fund supports <em>osteosarcoma research</em> and <em style={{ paddingRight: "0.15em" }}>music scholarships</em> for young musicians — two causes close to Kevin's heart.
         </p>
         <a href={D2.donateUrl} target="_blank" style={{
-          display: "inline-block",
+          display: M ? "block" : "inline-block",
           background: C.blueDeep, color: C.cream,
-          padding: "22px 56px", textDecoration: "none",
+          padding: M ? "18px 24px" : "22px 56px", textDecoration: "none",
           fontFamily: "'EB Garamond', Georgia, serif",
-          fontStyle: "italic", fontSize: 20,
+          fontStyle: "italic", fontSize: M ? 18 : 20,
           boxShadow: "0 16px 40px -12px rgba(31,53,86,0.5)"
         }}>Donate to the fund →</a>
         <div style={{
-          marginTop: 32,
+          marginTop: M ? 24 : 32,
           fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
-          fontSize: 16, color: C.inkSoft
+          fontSize: M ? 14 : 16, color: C.inkSoft
         }}>Fund Name: Kevin Chen · Fund ID: 711151</div>
       </div>
     </section>);
@@ -682,14 +857,16 @@ function Donate() {
 function Footer() {
   return (
     <footer style={{
-      padding: "40px 64px",
+      padding: M ? `28px ${gutter()}px` : "40px 64px",
       background: C.ink, color: "rgba(247,241,227,0.65)",
       fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
       fontSize: 14,
-      display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16
+      display: "flex", justifyContent: M ? "center" : "space-between",
+      alignItems: "center", flexWrap: "wrap", gap: M ? 20 : 16,
+      textAlign: M ? "center" : "left"
     }}>
       <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <img src="assets/logo.png" alt="Melodies of Courage" style={{ height: 56, display: "block", opacity: 0.85 }} />
+        <img src="assets/logo.png" alt="Melodies of Courage" style={{ height: M ? 44 : 56, display: "block", opacity: 0.85 }} />
         <span>· In memory of Kevin Chen</span>
       </span>
       <span style={{ display: "flex", alignItems: "center", gap: 18 }}>
@@ -725,6 +902,7 @@ function Footer() {
 // ---------- Page ----------
 window.MOCSite = function MOCSite({ paletteId = "dawn", paperId = "cream" }) {
   const [storyOpen, setStoryOpen] = useState(false);
+  applyViewport(useViewportWidth());
   const basePalette = PALETTES[paletteId] || PALETTES.dawn;
   const paperEntry = PAPERS[paperId];
   const paperBg = paperEntry && paperEntry.cream || basePalette.cream;
@@ -755,6 +933,7 @@ window.MOCSite = function MOCSite({ paletteId = "dawn", paperId = "cream" }) {
 };
 
 window.MOCGallery = function MOCGallery({ paletteId = "dawn", paperId = "mist" }) {
+  applyViewport(useViewportWidth());
   const basePalette = PALETTES[paletteId] || PALETTES.dawn;
   const paperEntry = PAPERS[paperId];
   const paperBg = paperEntry && paperEntry.cream || basePalette.cream;
@@ -764,7 +943,8 @@ window.MOCGallery = function MOCGallery({ paletteId = "dawn", paperId = "mist" }
   return (
     <div style={{ background: paperBg, position: "relative", minHeight: "100vh" }}>
       <Nav home={false} />
-      <div style={{ height: 178 }} />
+      {/* clears the absolutely-positioned nav, which shrinks with the logo */}
+      <div style={{ height: M ? 96 : 178 }} />
       <Gallery />
       <Footer />
     </div>);
