@@ -26,11 +26,32 @@ window.MOC_DATA = {
     body: "Kevin was a very special person. Besides his incredible talent, he was kind and thoughtful and always treated everyone with dignity and respect. He was a real treasure. His memory will always be with me, and the many friends and colleagues whose lives he touched.",
     attribution: "Jay Fishman, Conductor, Minnesota Sinfonia"
   },
+  // `preview` is a PNG of the first page, rendered from the PDF of the same
+  // name. The image is what the site shows — it displays identically on every
+  // browser, where an embedded PDF viewer does not. The PDF is offered as a
+  // download for anyone who wants to print it.
   sheetMusic: [
-    { title: "Going Home", subtitle: "Solo Piano · 2022", price: "$8" },
-    { title: "Reflections in Blue", subtitle: "Solo Piano · 2024", price: "$8" },
-    { title: "Letters Unsent", subtitle: "Solo Piano · 2024", price: "$8" },
-    { title: "Light Through Glass", subtitle: "Solo Piano · 2024", price: "$10" },
+    {
+      title: "Going Home",
+      subtitle: "Solo Piano · 2022",
+      preview: "assets/sheet-music/going-home-preview.png",
+      pdf: "assets/sheet-music/going-home-preview.pdf"
+    },
+    {
+      title: "Dreams of Flight",
+      subtitle: "Minnesota Sinfonia · 2022",
+      preview: "assets/sheet-music/dreams-of-flight-preview.png",
+      pdf: "assets/sheet-music/dreams-of-flight-preview.pdf"
+    }
+  ],
+  // No email is published anywhere on the site — address harvesting is the one
+  // thing a static page cannot defend against. Contact runs through these
+  // accounts instead.
+  // TODO: replace with the real profile URLs. These are placeholders and
+  // currently land on each service's home page.
+  social: [
+    { name: "Instagram", url: "https://www.instagram.com/" },
+    { name: "Substack", url: "https://substack.com/" }
   ],
   photoCaptions: [
     "At the piano",

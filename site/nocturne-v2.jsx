@@ -39,6 +39,33 @@ function applyViewport(w) {
   T = w <= TABLET_MAX;
 }
 
+/* The nav drawer, the story, the score preview and the contact note can each
+   lock scrolling, and handing off between two of them (drawer → story) used to
+   depend on cleanup order. A counter makes the release unambiguous: the page
+   scrolls again only when the last overlay has closed. */
+let scrollLocks = 0;
+function useScrollLock(active) {
+  useEffect(() => {
+    if (!active) return;
+    scrollLocks += 1;
+    document.body.style.overflow = "hidden";
+    return () => {
+      scrollLocks -= 1;
+      if (scrollLocks === 0) document.body.style.overflow = "";
+    };
+  }, [active]);
+}
+
+// Escape closes whichever overlay is on top.
+function useEscape(active, onClose) {
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e) => {if (e.key === "Escape") onClose();};
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, onClose]);
+}
+
 // Section gutter — the single source of horizontal rhythm.
 const gutter = () => M ? 22 : 64;
 // Sections keep their desktop proportions but breathe less on a phone.
@@ -119,16 +146,9 @@ function Nav({ onOpenStory, home = true }) {
   // Derived, not stored: if the viewport grows back to desktop mid-session the
   // drawer closes itself and releases the scroll lock.
   const drawerOpen = menuOpen && M;
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (e) => {if (e.key === "Escape") setMenuOpen(false);};
-    window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [drawerOpen]);
+  const closeMenu = () => setMenuOpen(false);
+  useScrollLock(drawerOpen);
+  useEscape(drawerOpen, closeMenu);
 
   const items = [
   { label: "His Story", href: storyHref, onClick: handleStory },
@@ -550,16 +570,8 @@ function StoryTeaser({ onOpenStory }) {
 
 // ---------- Story modal ----------
 function StoryModal({ open, onClose }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => {if (e.key === "Escape") onClose();};
-    window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [open, onClose]);
+  useScrollLock(open);
+  useEscape(open, onClose);
 
   if (!open) return null;
 
@@ -641,6 +653,7 @@ function StoryModal({ open, onClose }) {
 
 // ---------- Gallery ----------
 function Gallery() {
+  const [contactOpen, setContactOpen] = useState(false);
   const photos = [
   { src: "assets/kevin-piano-1.jpg", caption: "At the Steinway", span: "big" },
   { src: "assets/kevin-piano-2.jpg", caption: "In recital" },
@@ -713,15 +726,205 @@ function Gallery() {
           fontSize: M ? 15 : 17, color: C.inkSoft
         }}>
           To share a memory or photograph,{" "}
-          <a href="mailto:" style={{ color: C.blueDeep, textDecoration: "underline" }}>write to us</a>.
+          <button onClick={() => setContactOpen(true)} style={{
+            background: "transparent", border: "none", padding: 0, cursor: "pointer",
+            color: C.blueDeep, textDecoration: "underline",
+            fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
+            fontSize: "inherit"
+          }}>write to us</button>.
         </div>
       </div>
+
+      <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </section>);
+
+}
+
+// ---------- Score preview ----------
+/* Shows a PNG of the first page rather than embedding the PDF. An <img> renders
+   the same in every browser; an <iframe> of a PDF does not — iOS Safari in
+   particular is unreliable. The PDF stays available as a download. */
+function ScorePreview({ item, onClose }) {
+  const open = !!item;
+  useScrollLock(open);
+  useEscape(open, onClose);
+  if (!open) return null;
+
+  const stop = (e) => e.stopPropagation();
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex: 110,
+      /* Dark enough that the page behind never competes with the score. */
+      background: "rgba(23,38,62,0.88)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: M ? "flex-start" : "center",
+      padding: M ? "16px 12px 28px" : "36px",
+      overflowY: "auto", WebkitOverflowScrolling: "touch"
+    }}>
+      <img
+        src={item.preview}
+        alt={`${item.title} — first page of the score`}
+        onClick={stop}
+        style={{
+          display: "block", background: "#fff",
+          /* On a phone, fit the width and let the page scroll — a whole score
+             squeezed into one screen is unreadable. On desktop it fits fully. */
+          width: M ? "100%" : "auto",
+          maxWidth: "100%",
+          maxHeight: M ? "none" : "82vh",
+          objectFit: "contain",
+          boxShadow: "0 30px 70px rgba(31,53,86,0.5)"
+        }} />
+
+      {/* Caption over the actions on a phone — side by side they wrap into a
+          jumble at this width. */}
+      <div onClick={stop} style={{
+        marginTop: 16, display: "flex",
+        flexDirection: M ? "column" : "row", flexWrap: "wrap",
+        alignItems: "center", justifyContent: "center", gap: M ? 12 : 22,
+        fontFamily: "'EB Garamond', Georgia, serif", color: C.cream,
+        textAlign: "center"
+      }}>
+        <span style={{ fontStyle: "italic", fontSize: M ? 17 : 19 }}>
+          {item.title} — page one of the score
+        </span>
+        <span style={{
+          display: "flex", alignItems: "center", justifyContent: "center",
+          flexWrap: "wrap", gap: M ? 18 : 22
+        }}>
+        {/* The orchestral score is dense; fitting it to the screen makes it
+            small. Both escapes hand off to the browser's own zoom. */}
+        <a href={item.preview} target="_blank" rel="noopener" style={{
+          color: C.cream, fontStyle: "italic", fontSize: M ? 15 : 16,
+          borderBottom: `1px solid ${C.cream}`, textDecoration: "none", paddingBottom: 2
+        }}>View full size</a>
+        <a href={item.pdf} download style={{
+          color: C.cream, fontStyle: "italic", fontSize: M ? 15 : 16,
+          borderBottom: `1px solid ${C.cream}`, textDecoration: "none", paddingBottom: 2
+        }}>Download PDF</a>
+        <button onClick={onClose} style={{
+          background: "transparent", border: `1px solid ${C.cream}`,
+          color: C.cream, cursor: "pointer", borderRadius: 2,
+          fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
+          fontSize: M ? 15 : 16, padding: "8px 20px"
+        }}>Close</button>
+        </span>
+      </div>
+    </div>);
+
+}
+
+/* ---------- Social marks ----------
+   Drawn at whatever size the caller needs — small in the footer, large enough
+   to tap in the contact note — and inheriting colour from the parent, so one
+   definition serves both. Facebook is kept here though shared.js no longer
+   lists it; re-adding the channel is then a one-line change. */
+const SOCIAL_ICONS = {
+  Instagram: (size) =>
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <rect x="3" y="3" width="18" height="18" rx="5" />
+    <circle cx="12" cy="12" r="4" />
+    <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+  </svg>,
+
+  // Drawn a touch smaller than the rest: a solid mark carries more optical
+  // weight than an outline one, and at matching sizes it swamps Instagram.
+  Substack: (size) =>
+  <svg width={size * 0.88} height={size * 0.88} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M3.5 4h17v2.5h-17V4zm0 4.7h17v2.5h-17V8.7zm0 4.7h17V20l-8.5-4.5L3.5 20v-6.6z" />
+  </svg>,
+
+  Facebook: (size) =>
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+    <path d="M13.5 21v-7.5h2.6l.4-3h-3V8.6c0-.9.25-1.5 1.55-1.5H17V4.4c-.3-.04-1.3-.13-2.45-.13-2.43 0-4.1 1.48-4.1 4.2v2.03H8v3h2.45V21h3.05z" />
+  </svg>,
+
+  // Any channel added to shared.js without a matching mark still renders.
+  fallback: (size) =>
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3.5 9h17M3.5 15h17M12 3.2c-4 5.4-4 12.2 0 17.6M12 3.2c4 5.4 4 12.2 0 17.6" />
+  </svg>
+};
+
+const socialIcon = (name, size) => (SOCIAL_ICONS[name] || SOCIAL_ICONS.fallback)(size);
+
+// ---------- Contact note ----------
+function ContactModal({ open, onClose }) {
+  useScrollLock(open);
+  useEscape(open, onClose);
+  if (!open) return null;
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex: 110,
+      background: "rgba(31,53,86,0.6)",
+      backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      padding: M ? "20px 16px" : "40px", overflowY: "auto"
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: C.cream, color: C.ink,
+        maxWidth: 460, width: "100%",
+        padding: M ? "34px 24px 28px" : "44px 44px 36px",
+        position: "relative",
+        boxShadow: "0 40px 80px rgba(31,53,86,0.5)",
+        textAlign: "center"
+      }}>
+        <div style={{
+          fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
+          color: C.blueDeep, letterSpacing: "0.1em", fontSize: 15, marginBottom: 12
+        }}>♪ Get in touch</div>
+        <h3 style={{
+          fontFamily: "'EB Garamond', Georgia, serif", fontWeight: 400,
+          fontSize: M ? 28 : 32, lineHeight: 1.15, margin: "0 0 16px", letterSpacing: "-0.02em"
+        }}>Send us a message.</h3>
+        <p style={{
+          fontFamily: "'EB Garamond', Georgia, serif",
+          fontSize: M ? 16 : 17, lineHeight: 1.6, color: C.inkSoft, margin: "0 0 26px"
+        }}>
+          For the complete score, or to share a memory or photograph,
+          message us on any of these — we read every one.
+        </p>
+
+        {/* The marks are the buttons. They stay a comfortable tap target, and
+            aria-label carries the name for anyone who can't see the logo. */}
+        <div style={{ display: "flex", justifyContent: "center", gap: 22 }}>
+          {D2.social.map((s) =>
+          <a
+            key={s.name}
+            href={s.url}
+            target="_blank"
+            rel="noopener"
+            aria-label={s.name}
+            title={s.name}
+            style={{
+              width: 68, height: 68, borderRadius: "50%",
+              border: `1px solid ${C.blueLight}`,
+              color: C.blueDeep, textDecoration: "none",
+              display: "inline-flex", alignItems: "center", justifyContent: "center"
+            }}>
+            {socialIcon(s.name, 32)}
+          </a>
+          )}
+        </div>
+
+        <button onClick={onClose} style={{
+          marginTop: 22,
+          background: "transparent", border: "none", cursor: "pointer",
+          color: C.inkSoft, fontFamily: "'EB Garamond', Georgia, serif",
+          fontStyle: "italic", fontSize: 16,
+          borderBottom: `1px solid ${C.inkSoft}`, paddingBottom: 2
+        }}>Close</button>
+      </div>
+    </div>);
 
 }
 
 // ---------- Sheet music ----------
 function Sheet() {
+  const [preview, setPreview] = useState(null);
+  const [contactOpen, setContactOpen] = useState(false);
   return (
     <section id="sheet" style={{
       padding: sectionPad(120),
@@ -741,17 +944,17 @@ function Sheet() {
           <p style={{
             fontFamily: "'EB Garamond', Georgia, serif", fontStyle: "italic",
             fontSize: M ? 15 : 17, color: C.inkSoft, margin: 0
-          }}>All proceeds support the Kevin Chen Osteosarcoma & Music Fund.</p>
+          }}>The first page of each score is free to read. Get in touch for the complete music.</p>
         </div>
 
         <ul style={{ listStyle: "none", padding: 0, margin: 0, borderTop: `1px solid ${C.blueLight}` }}>
           {D2.sheetMusic.map((s, i) =>
-          /* One row of five columns on desktop; on a phone the same five cells
-             fold into three lines via named areas — number/price, title, actions. */
+          /* One row of four columns on desktop; on a phone the same cells fold
+             into three lines via named areas — number, title, actions. */
           <li key={i} style={{
             display: "grid",
-            gridTemplateColumns: M ? "1fr auto" : "auto 1fr auto auto auto",
-            gridTemplateAreas: M ? `"num price" "info info" "preview buy"` : undefined,
+            gridTemplateColumns: M ? "1fr auto" : "auto 1fr auto auto",
+            gridTemplateAreas: M ? `"num num" "info info" "preview contact"` : undefined,
             alignItems: "center",
             rowGap: M ? 14 : 0, columnGap: M ? 16 : 24,
             padding: M ? "20px 0" : "22px 0",
@@ -772,33 +975,37 @@ function Sheet() {
                 color: C.inkSoft, marginTop: 4, fontSize: M ? "16px" : "18px"
               }}>{s.subtitle}</div>
               </div>
-              <button style={{
-              gridArea: M ? "preview" : undefined,
-              justifySelf: M ? "start" : "auto",
-              background: "transparent", border: "none",
-              color: C.blueDeep, cursor: "pointer",
-              fontFamily: "'EB Garamond', Georgia, serif",
-              fontStyle: "italic", fontSize: 15,
-              borderBottom: `1px solid ${C.blueDeep}`, paddingBottom: 2,
-              paddingLeft: M ? 0 : undefined
-            }}>Preview</button>
-              <div style={{
-              gridArea: M ? "price" : undefined,
-              justifySelf: M ? "end" : "auto",
-              fontFamily: "'EB Garamond', Georgia, serif",
-              fontSize: 22, color: C.blueDeep
-            }}>{s.price}</div>
-              <button style={{
-              gridArea: M ? "buy" : undefined,
-              background: C.blueDeep, color: C.cream,
-              border: "none", padding: "12px 26px", cursor: "pointer",
-              fontFamily: "'EB Garamond', Georgia, serif",
-              fontStyle: "italic", fontSize: 15
-            }}>Buy →</button>
+              {/* A real link to the image, so it still opens if the overlay
+                  script ever fails; the click handler upgrades it to the modal. */}
+              <a
+              href={s.preview}
+              target="_blank"
+              rel="noopener"
+              onClick={(e) => {e.preventDefault();setPreview(s);}}
+              style={{
+                gridArea: M ? "preview" : undefined,
+                justifySelf: M ? "start" : "auto",
+                color: C.blueDeep, cursor: "pointer", textDecoration: "none",
+                fontFamily: "'EB Garamond', Georgia, serif",
+                fontStyle: "italic", fontSize: 15,
+                borderBottom: `1px solid ${C.blueDeep}`, paddingBottom: 2
+              }}>Preview</a>
+              <button
+              onClick={() => setContactOpen(true)}
+              style={{
+                gridArea: M ? "contact" : undefined,
+                background: C.blueDeep, color: C.cream,
+                border: "none", padding: "12px 26px", cursor: "pointer",
+                fontFamily: "'EB Garamond', Georgia, serif",
+                fontStyle: "italic", fontSize: 15
+              }}>Contact us →</button>
             </li>
           )}
         </ul>
       </div>
+
+      <ScorePreview item={preview} onClose={() => setPreview(null)} />
+      <ContactModal open={contactOpen} onClose={() => setContactOpen(false)} />
     </section>);
 
 }
@@ -870,29 +1077,15 @@ function Footer() {
         <span>· In memory of Kevin Chen</span>
       </span>
       <span style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        <a href="https://www.instagram.com/" target="_blank" rel="noopener" aria-label="Instagram" style={{
+        {/* URLs come from shared.js so the footer and the contact note can
+            never drift apart. */}
+        {D2.social.map((s) =>
+        <a key={s.name} href={s.url} target="_blank" rel="noopener" aria-label={s.name} style={{
           color: "rgba(247,241,227,0.75)", display: "inline-flex"
         }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="5" />
-            <circle cx="12" cy="12" r="4" />
-            <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-          </svg>
-        </a>
-        <a href="https://substack.com/" target="_blank" rel="noopener" aria-label="Substack" style={{
-          color: "rgba(247,241,227,0.75)", display: "inline-flex"
-        }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3.5 4h17v2.5h-17V4zm0 4.7h17v2.5h-17V8.7zm0 4.7h17V20l-8.5-4.5L3.5 20v-6.6z" />
-          </svg>
-        </a>
-        <a href="https://www.facebook.com/" target="_blank" rel="noopener" aria-label="Facebook" style={{
-          color: "rgba(247,241,227,0.75)", display: "inline-flex"
-        }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M13.5 21v-7.5h2.6l.4-3h-3V8.6c0-.9.25-1.5 1.55-1.5H17V4.4c-.3-.04-1.3-.13-2.45-.13-2.43 0-4.1 1.48-4.1 4.2v2.03H8v3h2.45V21h3.05z" />
-          </svg>
-        </a>
+            {socialIcon(s.name, 22)}
+          </a>
+        )}
         <span style={{ marginLeft: 6 }}>© 2026</span>
       </span>
     </footer>);
